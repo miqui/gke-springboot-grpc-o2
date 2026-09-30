@@ -185,8 +185,13 @@ Secrets overwrites them.
   [Prometheus plugin](https://github.com/headlamp-k8s/plugins/tree/main/prometheus)
   (`config.staticPlugins.enabled: true` in `k8s/headlamp/headlamp-values.yaml`, the chart default),
   which adds metrics charts to workload detail pages. It auto-detects Prometheus in-cluster via the
-  `headlamp-prometheus: "true"` label on `k8s/observability/prometheus-service.yaml` - no extra
-  per-cluster config needed.
+  `headlamp-prometheus: "true"` label on `k8s/observability/prometheus-service.yaml`. The plugin
+  reaches Prometheus through the API server's service proxy using Headlamp's own (read-only)
+  identity, and `view` has no `services/proxy` permission, so
+  `k8s/observability/headlamp-prometheus-rbac.yaml` grants exactly that: GET on the proxy of the
+  `prometheus` Service, in `observability` only (verify with `kubectl --as
+  system:serviceaccount:headlamp:headlamp get --raw /api/v1/namespaces/observability/services/prometheus:9090/proxy/-/healthy`;
+  Grafana's proxy stays forbidden).
 
   **[Polaris](https://polaris.docs.fairwinds.com/)** (`fairwinds-stable/polaris` Helm chart, own
   `polaris` namespace, its own Argo CD Application, values in `k8s/polaris/polaris-values.yaml`)
@@ -538,12 +543,13 @@ op run --env-file=.env -- ./gke-secrets-seed.sh
   **Kept by default** (free or pennies, and slow or awkward to recreate): the Artifact Registry repo
   and its images, the certificate/map/DNS authorization, Secret Manager secrets, service accounts
   and the GitHub Workload Identity pool. `--purge` removes those too. `--yes` skips the prompt.
-- **Smoke test**: `grpcurl grpc.miqui.dev:443 list` (services listed), then
-  `grpcurl grpc.miqui.dev:443 grpc.health.v1.Health/Check` (`SERVING`) and
+- **Smoke test**: `./test-api.sh` (needs `grpcurl` and `jq`; exits non-zero on any failed check;
+  `GRPC_ADDR=localhost:9090 PLAINTEXT=true ./test-api.sh` for a local run) walks the whole contract:
+  reflection, health, create/get/update/delete, validation, stale-version and conflict errors. By
+  hand: `grpcurl grpc.miqui.dev:443 list`, then `grpc.health.v1.Health/Check` (`SERVING`) and
   `grpcurl -d '{"limit": 1}' grpc.miqui.dev:443 message.v1.MessageService/ListMessages` (the seeded
   welcome message). `gke-bootstrap.sh` runs the health check itself at the end. The k6 scripts in
   [Load Testing with k6](#load-testing-with-k6) exercise every RPC, including the error paths.
-  (`test-api.sh` and `EXAMPLES.md` still describe the old REST API.)
 
 **If your public IP changes**, the control plane stops answering (`kubectl` times out) - re-authorize
 it with the command `gke-deploy.sh` prints at the end.
@@ -610,7 +616,7 @@ Workload Identity pool. So most one-time steps really are one-time.
 
 | # | Step | Where | Check |
 | --- | --- | --- | --- |
-| 1 | Tools: `gcloud` (signed in as an owner of `k8s-dev-412419`), `kubectl`, `helm`, `op` (1Password CLI, signed in), `git`, `gh` (optional), `grpcurl` (to smoke-test the API) | your machine | `gcloud auth list`, `op whoami` |
+| 1 | Tools: `gcloud` (signed in as an owner of `k8s-dev-412419`), `kubectl`, `helm`, `op` (1Password CLI, signed in), `git`, `gh` (optional), `grpcurl` and `jq` (for `test-api.sh`) | your machine | `gcloud auth list`, `op whoami` |
 | 2 | 1Password items for the secrets in `.env.example` (Postgres app password, Grafana admin, OpenObserve root) and, optionally, a Cloudflare API token | 1Password | `cp .env.example .env`, point the `op://` URIs at them |
 | 3 | This repo public at `github.com/miqui/gke-springboot-grpc-o2`, branch `main` - Argo CD syncs from there | GitHub | `git ls-remote https://github.com/miqui/gke-springboot-grpc-o2.git main` |
 | 4 | Run `gke-deploy.sh` (below), then set the two GitHub Actions **repository variables** it prints: `GCP_WIF_PROVIDER`, `GCP_CI_SA` | GitHub -> Settings -> Secrets and variables -> Actions -> Variables | `gh variable list` |
@@ -1187,5 +1193,5 @@ request.
 both are public like everything else on this API - there is no authentication yet. Reflection is
 what lets `grpcurl` and the k6 scripts run without the `.proto`.
 
-> `API-DESIGN.md`, `EXAMPLES.md` and `test-api.sh` were written for the earlier REST API and haven't
-> been ported to gRPC yet; the proto and this section are the source of truth.
+Design rationale is in [API-DESIGN.md](API-DESIGN.md), copy-paste `grpcurl` calls are in
+[EXAMPLES.md](EXAMPLES.md), and `./test-api.sh` runs the whole contract as a smoke test.

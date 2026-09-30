@@ -22,7 +22,9 @@ config:
   # Prometheus metrics" charts on workload detail pages) inside its image; this just keeps it
   # served (chart default, spelled out here for visibility). The plugin auto-detects Prometheus
   # in-cluster via the `headlamp-prometheus=true` label on k8s/observability/prometheus-service.yaml
-  # - no separate Prometheus install or per-plugin config needed.
+  # - no separate Prometheus install or per-plugin config needed. It does need permission to read
+  # through the API server's service proxy, which the read-only `view` role lacks: that one grant
+  # (GET services/proxy on the prometheus Service only) is k8s/observability/headlamp-prometheus-rbac.yaml.
   staticPlugins:
     enabled: true
 

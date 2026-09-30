@@ -12,6 +12,7 @@ resources:
   - prometheus-rbac.yaml
   - prometheus-deployment.yaml
   - prometheus-service.yaml
+  - headlamp-prometheus-rbac.yaml
   - node-exporter-daemonset.yaml
   - kube-state-metrics-rbac.yaml
   - kube-state-metrics-deployment.yaml

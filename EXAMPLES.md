@@ -1,99 +1,123 @@
 # API Examples
 
-Example `curl` calls against the message-service REST API, ordered simple to complex. All of them
-target the public endpoint `https://api.miqui.dev` (use `http://localhost:8080` for a local
-`python -m app` run). See [README.md](README.md#rest-api) for the endpoint summary and
-[API-DESIGN.md](API-DESIGN.md) for the status codes, validation rules and error model. With
-`API_DOCS_ENABLED=true` the same API is browsable at `https://api.miqui.dev/docs`.
+Example [`grpcurl`](https://github.com/fullstorydev/grpcurl) calls against the message-service gRPC
+API, ordered simple to complex. All of them target the public endpoint `grpc.miqui.dev:443` (TLS); for
+a local `./mvnw spring-boot:run` use `localhost:9090` with `-plaintext`. The schema comes from server
+reflection, so no `.proto` file is needed. See [README.md](README.md#grpc-api) for the RPC summary and
+[API-DESIGN.md](API-DESIGN.md) for the status codes, validation rules and error model. `./test-api.sh`
+runs most of these as an automated smoke test.
 
 Replace placeholder IDs (`<AUTHOR_ID>`, `<MESSAGE_ID>`) with real ones from your own data - run
-example 1 first to find some. Every example uses `jq` to pretty-print; drop `| jq` if you don't have it.
+example 1 first to find some. Every example uses `jq` where it helps; drop `| jq` if you don't have it.
 
 ```bash
-BASE=https://api.miqui.dev
+ADDR=grpc.miqui.dev:443          # local: ADDR=localhost:9090 and add -plaintext to every grpcurl
+M=message.v1.MessageService
+A=message.v1.AuthorService
 ```
+
+`grpcurl` prints the proto field names (`created_at`, `total_count`) and omits fields at their default
+value (a message at `version` 0 has no `version` key) unless you add `-emit-defaults`. `int64` values
+such as `total_count` are strings in JSON.
 
 ---
 
-### 1. List authors
+### 1. Discover the API
 
 ```bash
-curl -s "$BASE/authors" | jq
+grpcurl $ADDR list                       # services
+grpcurl $ADDR list $M                    # methods of one service
+grpcurl $ADDR describe $M.CreateMessage  # a method and its request/response types
+grpcurl $ADDR describe message.v1.CreateMessageRequest
+```
+
+```
+grpc.health.v1.Health
+grpc.reflection.v1.ServerReflection
+message.v1.AuthorService
+message.v1.MessageService
+```
+
+### 2. Health
+
+```bash
+grpcurl $ADDR grpc.health.v1.Health/Check
+```
+
+```json
+{ "status": "SERVING" }
+```
+
+### 3. List authors
+
+```bash
+grpcurl $ADDR $A/ListAuthors
 ```
 
 ```json
 {
   "items": [
-    { "id": "1030e3d2-d6df-490c-b9f6-828f9770cb0e", "name": "system",
-      "email": "system@message-service.local", "createdAt": "2026-09-24T03:03:04.720108Z" }
+    { "id": "20a55a7e-528b-4459-a0ce-482d5b9489f7", "name": "system",
+      "email": "system@message-service.local", "created_at": "2026-09-30T16:40:06.283066Z" }
   ],
-  "totalCount": 1
+  "total_count": "1"
 }
 ```
 
-Authors are paginated like messages (`?limit=50&offset=0` by default), oldest first.
+Authors are paginated like messages (`limit` 50 and `offset` 0 by default), oldest first.
 
-### 2. Get a single author by ID
-
-```bash
-curl -s "$BASE/authors/<AUTHOR_ID>" | jq
-```
-
-### 3. Get a single message by ID
+### 4. Get a single author or message by ID
 
 ```bash
-curl -s "$BASE/messages/<MESSAGE_ID>" | jq
+grpcurl -d '{"id": "<AUTHOR_ID>"}'  $ADDR $A/GetAuthor
+grpcurl -d '{"id": "<MESSAGE_ID>"}' $ADDR $M/GetMessage
 ```
 
-The response embeds the author. The first read of a message loads it from Postgres and populates the
+`GetMessage` embeds the author. The first read of a message loads it from Postgres and populates the
 Hazelcast cache; later reads are served from the cache until the message is updated or deleted.
 
-### 4. Create an author
+### 5. Create an author
 
 ```bash
-curl -s -i -X POST "$BASE/authors" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "Ada Lovelace", "email": "ada@example.com"}'
+grpcurl -d '{"name": "Ada Lovelace", "email": "ada@example.com"}' $ADDR $A/CreateAuthor
 ```
 
-Answers `201 Created` with a `Location: /authors/<id>` header and the created author. A second author
-with the same email is a `409 CONFLICT`.
+Answers with the created author. A second author with the same email is `ALREADY_EXISTS`
+(`ErrorInfo.reason` `CONFLICT`).
 
-### 5. Create a message
+### 6. Create a message
 
 ```bash
-curl -s -i -X POST "$BASE/messages" \
-  -H 'Content-Type: application/json' \
-  -d '{"title": "Hello", "content": "First message", "authorId": "<AUTHOR_ID>"}'
+grpcurl -d '{"title": "Hello", "content": "First message", "author_id": "<AUTHOR_ID>"}' $ADDR $M/CreateMessage
 ```
 
-Answers `201 Created` with `Location: /messages/<id>`; the new message is at `"version": 0`. An unknown
-`authorId` is a `404 NOT_FOUND`.
+The new message is at `version` 0 (omitted from the JSON; add `-emit-defaults` to see it). An unknown
+`author_id` is `NOT_FOUND`.
 
-### 6. Paginate messages - first page
+### 7. Paginate messages - first page
 
 ```bash
-curl -s "$BASE/messages?limit=5&offset=0" | jq '{totalCount, ids: [.items[].id]}'
+grpcurl -d '{"limit": 5, "offset": 0}' $ADDR $M/ListMessages | jq '{total_count, ids: [.items[].id]}'
 ```
 
-Newest first. `totalCount` is the total number of messages, independent of `limit`/`offset`.
+Newest first. `total_count` is the total number of messages, independent of `limit`/`offset`.
 
-### 7. Paginate messages - next page
+### 8. Paginate messages - next page
 
 ```bash
-curl -s "$BASE/messages?limit=5&offset=5" | jq '{totalCount, ids: [.items[].id]}'
+grpcurl -d '{"limit": 5, "offset": 5}' $ADDR $M/ListMessages | jq '{total_count, ids: [.items[].id]}'
 ```
 
-`limit` must be `1`-`200` and `offset` must be `>= 0`; anything else is a `400` (see example 10).
+`limit` must be `1`-`200` and `offset` must be `>= 0`; anything else is `INVALID_ARGUMENT` (see
+example 11).
 
-### 8. Update a message with optimistic locking
+### 9. Update a message with optimistic locking
 
 Send back the `version` you read. `title` is optional; `content` and `version` are required.
 
 ```bash
-curl -s -X PATCH "$BASE/messages/<MESSAGE_ID>" \
-  -H 'Content-Type: application/json' \
-  -d '{"title": "Hello (edited)", "content": "Edited content", "version": 0}' | jq '{version, title}'
+grpcurl -emit-defaults -d '{"id": "<MESSAGE_ID>", "title": "Hello (edited)", "content": "Edited content", "version": 0}' \
+  $ADDR $M/UpdateMessage | jq '{version, title}'
 ```
 
 ```json
@@ -104,104 +128,104 @@ Repeat the same request: the row is now at version 1, so version 0 is stale and 
 without touching the row.
 
 ```bash
-curl -s -i -X PATCH "$BASE/messages/<MESSAGE_ID>" \
-  -H 'Content-Type: application/json' \
-  -d '{"content": "Stale write", "version": 0}'
+grpcurl -d '{"id": "<MESSAGE_ID>", "content": "Stale write", "version": 0}' $ADDR $M/UpdateMessage
 ```
 
 ```
-HTTP/1.1 409 Conflict
-content-type: application/problem+json
-
-{"type":"/problems/conflict","title":"Conflict","status":409,
- "detail":"Message with ID '...' has changed since version 0 was read; refetch and retry.",
- "instance":"/messages/<ID>","code":"CONFLICT"}
+ERROR:
+  Code: Aborted
+  Message: Message with ID '...' has changed since version 0 was read; refetch and retry.
+  Details:
+  1)	{
+    	  "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+    	  "domain": "message-service.miqui.dev",
+    	  "reason": "CONFLICT"
+    	}
 ```
 
-### 9. An author with their messages
+The fix is the client's read-again-and-retry: `GetMessage`, then resend with the new `version`.
+
+### 10. An author with their messages
 
 ```bash
-curl -s "$BASE/authors/<AUTHOR_ID>?include=messages" | jq '{name, messages: [.messages[].title]}'
+grpcurl -d '{"id": "<AUTHOR_ID>", "include_messages": true}' $ADDR $A/GetAuthor \
+  | jq '{name: .author.name, messages: [.messages[].title]}'
 ```
 
-Without `?include=messages` the `messages` key is omitted. The embedded messages don't repeat the
+Without `include_messages` the `messages` list is empty. The embedded messages don't repeat the
 author, so there is no author -> messages -> author nesting.
 
-### 10. Error responses
+### 11. Error responses
 
-Every error is `application/problem+json` with a stable `code`. Validation failures list every bad
-field at once:
+Every error is a `google.rpc.Status` whose `ErrorInfo.reason` is a stable code. Validation failures
+list every bad field at once in a `BadRequest` detail:
 
 ```bash
-curl -s -X POST "$BASE/messages" -H 'Content-Type: application/json' \
-  -d '{"title": "", "content": "", "authorId": "not-a-uuid"}' | jq
+grpcurl -d '{"title": "", "content": "", "author_id": "not-a-uuid"}' $ADDR $M/CreateMessage
 ```
 
-```json
-{
-  "type": "/problems/bad-user-input",
-  "title": "Bad Request",
-  "status": 400,
-  "detail": "The request content was invalid or failed validation constraints.",
-  "instance": "/messages",
-  "code": "BAD_USER_INPUT",
-  "invalidParams": [
-    { "name": "title", "reason": "title is required and cannot be blank" },
-    { "name": "content", "reason": "content is required and cannot be blank" },
-    { "name": "authorId", "reason": "authorId must be a valid UUID" }
-  ]
-}
+```
+ERROR:
+  Code: InvalidArgument
+  Message: The request content was invalid or failed validation constraints.
+  Details:
+  1)	{ "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+    	  "domain": "message-service.miqui.dev", "reason": "BAD_USER_INPUT" }
+  2)	{ "@type": "type.googleapis.com/google.rpc.BadRequest",
+    	  "fieldViolations": [
+    	    { "field": "title",     "description": "title is required and cannot be blank" },
+    	    { "field": "content",   "description": "content is required and cannot be blank" },
+    	    { "field": "author_id", "description": "author_id must be a valid UUID" } ] }
 ```
 
 Other cases:
 
 ```bash
-# 404 NOT_FOUND - a well-formed id that doesn't exist
-curl -s -i "$BASE/messages/00000000-0000-0000-0000-000000000000"
+# NOT_FOUND - a well-formed id that doesn't exist
+grpcurl -d '{"id": "00000000-0000-0000-0000-000000000000"}' $ADDR $M/GetMessage
 
-# 400 BAD_USER_INPUT - a malformed id (invalidParams names "id")
-curl -s -i "$BASE/messages/not-a-uuid"
+# INVALID_ARGUMENT / BAD_USER_INPUT - a malformed id (the violation names "id")
+grpcurl -d '{"id": "not-a-uuid"}' $ADDR $M/GetMessage
 
-# 400 BAD_USER_INPUT - out-of-range pagination (never silently clamped)
-curl -s -i "$BASE/messages?limit=500&offset=-1"
+# INVALID_ARGUMENT / BAD_USER_INPUT - out-of-range pagination (never silently clamped)
+grpcurl -d '{"limit": 500, "offset": -1}' $ADDR $M/ListMessages
 
-# 400 BAD_USER_INPUT - malformed JSON
-curl -s -i -X POST "$BASE/messages" -H 'Content-Type: application/json' -d '{"title": '
-
-# 409 CONFLICT - deleting an author that still has messages
-curl -s -i -X DELETE "$BASE/authors/<AUTHOR_ID>"
+# FAILED_PRECONDITION (reason CONFLICT) - deleting an author that still has messages
+grpcurl -d '{"id": "<AUTHOR_ID>"}' $ADDR $A/DeleteAuthor
 ```
 
-### 11. Full lifecycle in one script
+In a script, read the exit code (`grpcurl` exits non-zero on any non-OK status, printing the error to
+stderr) and parse `"reason"` from the details - see `reason()` in [`test-api.sh`](test-api.sh).
+
+### 12. Full lifecycle in one script
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BASE=https://api.miqui.dev
+ADDR=grpc.miqui.dev:443
+M=message.v1.MessageService
+A=message.v1.AuthorService
 
 # Create an author and a message.
-AUTHOR_ID=$(curl -s -X POST "$BASE/authors" -H 'Content-Type: application/json' \
-  -d "{\"name\": \"Demo\", \"email\": \"demo-$(date +%s)@example.com\"}" | jq -r .id)
-MSG_ID=$(curl -s -X POST "$BASE/messages" -H 'Content-Type: application/json' \
-  -d "{\"title\": \"Demo\", \"content\": \"Hello\", \"authorId\": \"$AUTHOR_ID\"}" | jq -r .id)
+AUTHOR_ID=$(grpcurl -d "{\"name\": \"Demo\", \"email\": \"demo-$(date +%s)@example.com\"}" $ADDR $A/CreateAuthor | jq -r .id)
+MSG_ID=$(grpcurl -d "{\"title\": \"Demo\", \"content\": \"Hello\", \"author_id\": \"$AUTHOR_ID\"}" $ADDR $M/CreateMessage | jq -r .id)
 
 # Read it, update it (version 0 -> 1), read it again.
-curl -s "$BASE/messages/$MSG_ID" | jq '{title, version}'
-curl -s -X PATCH "$BASE/messages/$MSG_ID" -H 'Content-Type: application/json' \
-  -d '{"content": "Hello again", "version": 0}' | jq '{content, version}'
-curl -s "$BASE/messages/$MSG_ID" | jq '{content, version}'
+grpcurl -d "{\"id\": \"$MSG_ID\"}" $ADDR $M/GetMessage | jq '{title, version}'
+grpcurl -emit-defaults -d "{\"id\": \"$MSG_ID\", \"content\": \"Hello again\", \"version\": 0}" $ADDR $M/UpdateMessage | jq '{content, version}'
+grpcurl -d "{\"id\": \"$MSG_ID\"}" $ADDR $M/GetMessage | jq '{content, version}'
 
 # Walk every page of messages.
 OFFSET=0; LIMIT=50
 while :; do
-  PAGE=$(curl -s "$BASE/messages?limit=$LIMIT&offset=$OFFSET")
+  PAGE=$(grpcurl -d "{\"limit\": $LIMIT, \"offset\": $OFFSET}" $ADDR $M/ListMessages)
   echo "$PAGE" | jq -r '.items[].title'
-  TOTAL=$(echo "$PAGE" | jq .totalCount)
+  TOTAL=$(echo "$PAGE" | jq -r .total_count)
   OFFSET=$((OFFSET + LIMIT))
   [ "$OFFSET" -ge "$TOTAL" ] && break
 done
 
-# Clean up: the message first, then its author (409 while any message remains).
-curl -s -o /dev/null -w 'delete message: %{http_code}\n' -X DELETE "$BASE/messages/$MSG_ID"
-curl -s -o /dev/null -w 'delete author:  %{http_code}\n' -X DELETE "$BASE/authors/$AUTHOR_ID"
+# Clean up: the message first, then its author (FAILED_PRECONDITION while any message remains).
+grpcurl -d "{\"id\": \"$MSG_ID\"}" $ADDR $M/DeleteMessage
+grpcurl -d "{\"id\": \"$AUTHOR_ID\"}" $ADDR $A/DeleteAuthor
 ```
