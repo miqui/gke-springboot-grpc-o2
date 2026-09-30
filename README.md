@@ -1105,7 +1105,7 @@ has no `version` key in responses - `k6-common.js` reads it with `versionOf()`.
 
 ## Pagination
 
-`ListMessages` and `ListAuthors` return a page `{ "items": [...], "totalCount": "n" }` rather than
+`ListMessages` and `ListAuthors` return a page `{ "items": [...], "total_count": "n" }` rather than
 the whole table in one response - unbounded against a table that's had any real traffic. They accept
 two optional request fields (`optional`, so "absent" and `0` are distinguishable):
 
@@ -1118,8 +1118,12 @@ two optional request fields (`optional`, so "absent" and `0` are distinguishable
 grpcurl -d '{"limit": 20, "offset": 40}' grpc.miqui.dev:443 message.v1.MessageService/ListMessages
 ```
 
-`totalCount` (`int64`, so a string in proto3 JSON) carries the *total* row count, independent of
-`limit`/`offset`, so a client can compute how many pages remain (`ceil(totalCount / limit)`).
+`total_count` (`int64`, so a string in proto3 JSON) carries the *total* row count, independent of
+`limit`/`offset`, so a client can compute how many pages remain (`ceil(total_count / limit)`).
+
+> **JSON field names.** `grpcurl` prints the proto field names (`total_count`, `created_at`,
+> `author_id`); the k6 scripts use the standard proto3 JSON mapping (`totalCount`, `createdAt`,
+> `authorId`). Both are the same fields, and either spelling is accepted on input.
 Out-of-range values (`limit: 0`, `limit: 500`, `offset: -1`, ...) are rejected with
 `INVALID_ARGUMENT` (`BAD_USER_INPUT`) rather than silently clamped, through the same validation path
 (and the same `BadRequest` detail) as every other request.
