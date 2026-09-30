@@ -24,7 +24,7 @@ spec:
         # (k8s/kustomization.yaml renames it to the registry name) - the override is applied
         # like `kustomize edit set image message-service=<registry>/grpc-message-api:<tag>`.
         - alias: message-service
-          imageName: us-central1-docker.pkg.dev/k8s-dev-412419/api-images/grpc-message-api
+          imageName: us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api
           manifestTargets:
             kustomize:
               name: message-service

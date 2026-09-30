@@ -17,5 +17,5 @@ resources:
 
 images:
   - name: message-service
-    newName: us-central1-docker.pkg.dev/k8s-dev-412419/api-images/grpc-message-api
+    newName: us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api
     newTag: latest

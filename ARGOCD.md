@@ -89,7 +89,7 @@ syncs by itself.
 
 ## Image Updater
 
-CI pushes `us-central1-docker.pkg.dev/k8s-dev-412419/api-images/rest-message-api:<yyyymmddHHMMSS>-<sha7>`;
+CI pushes `us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api:<yyyymmddHHMMSS>-<sha7>`;
 Image Updater picks the newest tag (`alphabetical` strategy) roughly every 2 minutes and writes it
 into the Application — **no git commit is made**. It reads Artifact Registry with a short-lived
 token from the GKE metadata server (Workload Identity, `argocd-image-updater` GSA, read-only); the

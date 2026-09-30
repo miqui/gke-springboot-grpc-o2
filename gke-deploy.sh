@@ -39,7 +39,7 @@ VPC="${VPC:-dev-vpc}"
 SUBNET="${SUBNET:-dev-subnet}"
 ROUTER="${ROUTER:-dev-router}"
 NAT="${NAT:-dev-nat}"
-REPO="${REPO:-api-images}"
+REPO="${REPO:-springboot-grpc-o2}"   # one Artifact Registry repo per project
 MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-2}"
 MIN_NODES="${MIN_NODES:-3}"
 MAX_NODES="${MAX_NODES:-5}"
@@ -65,7 +65,7 @@ NODE_SA="gke-dev-nodes"
 CROSSPLANE_SA="crossplane-gcp"          # KSA crossplane-system/provider-gcp
 ESO_SA="external-secrets"               # KSA external-secrets/external-secrets
 IMAGE_UPDATER_SA="argocd-image-updater" # KSA argocd/argocd-image-updater
-CI_SA="ci-pusher"
+CI_SA="ci-springboot-grpc-o2"   # one CI service account per project
 WIF_POOL="github"
 WIF_PROVIDER="github-oidc"
 
@@ -384,9 +384,13 @@ repo_role "$CI_SA"            roles/artifactregistry.writer  # CI push
 log "Configuring local docker for push"
 gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-# ---- 9. Keyless CI: GitHub OIDC -> Workload Identity Federation -> ci-pusher ----
-# Pools are soft-deleted for 30 days and their IDs can't be reused meanwhile, so gke-teardown.sh
-# keeps this (it costs nothing) unless run with --purge.
+# ---- 9. Keyless CI: GitHub OIDC -> Workload Identity Federation -> $CI_SA ----
+# The pool and provider are shared by every project in this GCP project (pools are soft-deleted for
+# 30 days, so gke-teardown.sh never purges it). The provider condition is only a coarse gate (this
+# GitHub owner, main branch); what a repo may actually do is decided by its own binding below, which
+# lets that repo - and only that repo - impersonate this project's CI service account.
+GITHUB_OWNER="${GITHUB_REPO%%/*}"
+WIF_CONDITION="assertion.repository_owner == '${GITHUB_OWNER}' && assertion.ref == 'refs/heads/main'"
 log "Workload Identity Federation for GitHub Actions ($GITHUB_REPO)"
 if gcloud iam workload-identity-pools describe "$WIF_POOL" --location=global &>/dev/null; then
   echo "    pool $WIF_POOL: exists"
@@ -396,14 +400,18 @@ else
 fi
 if gcloud iam workload-identity-pools providers describe "$WIF_PROVIDER" \
      --workload-identity-pool="$WIF_POOL" --location=global &>/dev/null; then
-  echo "    provider $WIF_PROVIDER: exists"
+  # Converge an older repo-specific condition to the owner-wide one (existing repos' bindings keep
+  # working; the condition only widens from one repo to the owner's repos).
+  gcloud iam workload-identity-pools providers update-oidc "$WIF_PROVIDER" \
+    --workload-identity-pool="$WIF_POOL" --location=global \
+    --attribute-condition="$WIF_CONDITION" --quiet >/dev/null
+  echo "    provider $WIF_PROVIDER: exists (condition converged)"
 else
-  # Only tokens minted for this repo's main branch are accepted at all.
   gcloud iam workload-identity-pools providers create-oidc "$WIF_PROVIDER" \
     --workload-identity-pool="$WIF_POOL" --location=global \
     --issuer-uri="https://token.actions.githubusercontent.com" \
     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-    --attribute-condition="assertion.repository == '${GITHUB_REPO}' && assertion.ref == 'refs/heads/main'"
+    --attribute-condition="$WIF_CONDITION"
 fi
 gcloud iam service-accounts add-iam-policy-binding "$(sa_email "$CI_SA")" \
   --role=roles/iam.workloadIdentityUser \

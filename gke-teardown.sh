@@ -35,7 +35,7 @@ VPC="${VPC:-dev-vpc}"
 SUBNET="${SUBNET:-dev-subnet}"
 ROUTER="${ROUTER:-dev-router}"
 NAT="${NAT:-dev-nat}"
-REPO="${REPO:-api-images}"
+REPO="${REPO:-springboot-grpc-o2}"
 DOMAIN="${DOMAIN:-miqui.dev}"
 API_HOST="${API_HOST:-grpc.${DOMAIN}}"
 
@@ -46,7 +46,7 @@ DNS_AUTH="grpc-dns-auth"
 CERT="grpc-cert"
 CERT_MAP="grpc-cert-map"
 CERT_MAP_ENTRY="grpc-cert-map-entry"
-SERVICE_ACCOUNTS=(gke-dev-nodes crossplane-gcp external-secrets argocd-image-updater ci-pusher)
+SERVICE_ACCOUNTS=(gke-dev-nodes crossplane-gcp external-secrets argocd-image-updater ci-springboot-grpc-o2)
 PROJECT_ROLES=(
   "gke-dev-nodes=roles/container.defaultNodeServiceAccount"
   "crossplane-gcp=roles/cloudsql.admin"
@@ -92,7 +92,7 @@ EOF
 if [[ "$PURGE" -eq 1 ]]; then
   cat <<EOF
   --purge              : Artifact Registry $REPO (ALL IMAGES), certificate $CERT + map + DNS
-                         authorization, Secret Manager secrets, service accounts, WIF pool $WIF_POOL
+                         authorization, Secret Manager secrets, service accounts
 EOF
 else
   echo "  Kept (use --purge) : Artifact Registry, certificate, secrets, service accounts, WIF pool"
@@ -333,10 +333,8 @@ if [[ "$PURGE" -eq 1 ]]; then
       && echo "    $sa" || true
   done
 
-  # Soft-deleted for 30 days; gke-deploy.sh can't recreate a pool with the same ID until then
-  # (undelete it instead: gcloud iam workload-identity-pools undelete github --location=global).
-  log "Purging Workload Identity pool: $WIF_POOL"
-  gcloud iam workload-identity-pools delete "$WIF_POOL" --location=global --quiet 2>/dev/null || skip
+  # The Workload Identity pool "$WIF_POOL" is shared by every project (each has its own binding
+  # and CI service account), so it is never purged here.
 fi
 
 # ---- Summary ----------------------------------------------------------------------
@@ -349,6 +347,6 @@ if [[ "$PURGE" -ne 1 ]]; then
 
   Still present (by design, for the next gke-deploy.sh): Artifact Registry $REPO, certificate
   $CERT (+ map, DNS authorization and its Cloudflare CNAME), Secret Manager secrets, service
-  accounts, Workload Identity pool $WIF_POOL. Remove them with --purge.
+  accounts. Remove them with --purge (the shared WIF pool is never removed).
 EOF
 fi

@@ -21,15 +21,15 @@ on:
       - ".github/workflows/message-service-ci.yml"
   workflow_dispatch: {}
 
-# Image: us-central1-docker.pkg.dev/<project>/api-images/grpc-message-api (Artifact Registry).
+# Image: us-central1-docker.pkg.dev/<project>/springboot-grpc-o2/grpc-message-api (Artifact Registry).
 # Pushing authenticates keylessly: GitHub's OIDC token is exchanged through Workload Identity
-# Federation for a short-lived token of the ci-pusher service account, which can only write to
+# Federation for a short-lived token of the ci-springboot-grpc-o2 service account, which can only write to
 # that one repository. The federation provider only accepts tokens for this repo's main branch,
 # so pull requests (which never push) can't obtain it either. Set up by gke-deploy.sh, which
 # prints the two repository variables below.
 env:
   REGISTRY: us-central1-docker.pkg.dev
-  IMAGE: us-central1-docker.pkg.dev/k8s-dev-412419/api-images/grpc-message-api
+  IMAGE: us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api
 
 jobs:
   build-and-push:
