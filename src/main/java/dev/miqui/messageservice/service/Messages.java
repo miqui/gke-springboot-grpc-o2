@@ -44,13 +44,19 @@ public class Messages {
 
     /** Cache-aside: read the cache first; on a miss load from the DB and populate the cache. */
     public Message get(UUID id) {
-        Optional<Message> cached = cache.get(id);
-        if (cached.isPresent()) {
-            return cached.get();
-        }
-        Message message = messages.find(id).orElseThrow(() -> notFound(id));
-        cache.put(message);
-        return message;
+        return cache.withLock(id, () -> {
+            Optional<Message> cached = cache.get(id);
+            if (cached.isPresent()) {
+                Message message = cached.get();
+                UUID authorId = UUID.fromString(message.getAuthor().getId());
+                return message.toBuilder()
+                        .setAuthor(authors.find(authorId).orElseThrow(() -> authorNotFound(authorId)))
+                        .build();
+            }
+            Message message = messages.find(id).orElseThrow(() -> notFound(id));
+            cache.put(message);
+            return message;
+        });
     }
 
     public Message create(String title, String content, UUID authorId) {
@@ -76,29 +82,30 @@ public class Messages {
      * the id doesn't exist, otherwise ABORTED (the row moved on).
      */
     public Message update(UUID id, String title, String content, int version) {
-        Optional<Message> updated = tx.execute(s -> messages.updateIfVersion(id, title, content, version)
-                .map(updatedId -> messages.find(updatedId).orElseThrow()));
-        if (updated.isEmpty()) {
-            // The caller's version is stale, so a cached copy may be too: a slow reader can
-            // repopulate the cache with a pre-update row right after an update's eviction. Evict
-            // so the next read reloads from the DB instead of handing out that version forever.
+        return cache.withLock(id, () -> {
+            Optional<Message> updated = tx.execute(s -> messages.updateIfVersion(id, title, content, version)
+                    .map(updatedId -> messages.find(updatedId).orElseThrow()));
             cache.evict(id);
-            if (!messages.exists(id)) {
-                throw notFound(id);
+            if (updated.isEmpty()) {
+                if (!messages.exists(id)) {
+                    throw notFound(id);
+                }
+                throw new ApiException.Conflict(Status.Code.ABORTED, "Message with ID '" + id
+                        + "' has changed since version " + version + " was read; refetch and retry.");
             }
-            throw new ApiException.Conflict(Status.Code.ABORTED, "Message with ID '" + id
-                    + "' has changed since version " + version + " was read; refetch and retry.");
-        }
-        cache.evict(id);
-        return updated.get();
+            return updated.get();
+        });
     }
 
     public void delete(UUID id) {
-        boolean deleted = messages.delete(id);
-        cache.evict(id);
-        if (!deleted) {
-            throw notFound(id);
-        }
+        cache.withLock(id, () -> {
+            boolean deleted = messages.delete(id);
+            cache.evict(id);
+            if (!deleted) {
+                throw notFound(id);
+            }
+            return null;
+        });
     }
 
     private static ApiException notFound(UUID id) {

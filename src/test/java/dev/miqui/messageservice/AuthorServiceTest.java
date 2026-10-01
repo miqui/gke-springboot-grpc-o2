@@ -5,6 +5,7 @@ import dev.miqui.messageservice.v1.DeleteAuthorRequest;
 import dev.miqui.messageservice.v1.DeleteMessageRequest;
 import dev.miqui.messageservice.v1.GetAuthorRequest;
 import dev.miqui.messageservice.v1.GetAuthorResponse;
+import dev.miqui.messageservice.v1.GetMessageRequest;
 import dev.miqui.messageservice.v1.ListAuthorsRequest;
 import dev.miqui.messageservice.v1.MessageSummary;
 import dev.miqui.messageservice.v1.UpdateAuthorRequest;
@@ -103,6 +104,27 @@ class AuthorServiceTest extends GrpcTestSupport {
                 .setId(UUID.randomUUID().toString()).build())).code()).isEqualTo(Code.NOT_FOUND);
         assertThat(rpcError(() -> authors.updateAuthor(UpdateAuthorRequest.newBuilder()
                 .setId(author.getId()).setName("  ").build())).code()).isEqualTo(Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void updatingAnAuthorRefreshesEveryCachedMessageWithoutChangingTheirVersions() {
+        Author author = createAuthor();
+        var first = createMessage(author.getId(), "First");
+        var second = createMessage(author.getId(), "Second");
+        var firstRequest = GetMessageRequest.newBuilder().setId(first.getId()).build();
+        var secondRequest = GetMessageRequest.newBuilder().setId(second.getId()).build();
+        messages.getMessage(firstRequest);
+        messages.getMessage(secondRequest);
+
+        Author updated = authors.updateAuthor(UpdateAuthorRequest.newBuilder()
+                .setId(author.getId()).setName("Renamed").setEmail("renamed@example.com").build());
+        cache.calls.clear();
+
+        assertThat(messages.getMessage(firstRequest)).isEqualTo(first.toBuilder().setAuthor(updated).build());
+        assertThat(messages.getMessage(secondRequest)).isEqualTo(second.toBuilder().setAuthor(updated).build());
+        assertThat(cache.calls).containsExactly(
+                new RecordingMessageCache.Call("get", UUID.fromString(first.getId())),
+                new RecordingMessageCache.Call("get", UUID.fromString(second.getId())));
     }
 
     @Test

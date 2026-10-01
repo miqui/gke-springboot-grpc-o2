@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /** In-memory {@link MessageCache} that records every call, standing in for Hazelcast. */
 public class RecordingMessageCache implements MessageCache {
@@ -19,6 +21,18 @@ public class RecordingMessageCache implements MessageCache {
     public final Map<UUID, Message> data = new ConcurrentHashMap<>();
     public final List<Call> calls = new CopyOnWriteArrayList<>();
     public volatile boolean connected = true;
+    private final Map<UUID, ReentrantLock> locks = new ConcurrentHashMap<>();
+
+    @Override
+    public <T> T withLock(UUID id, Supplier<T> operation) {
+        ReentrantLock lock = locks.computeIfAbsent(id, key -> new ReentrantLock());
+        lock.lock();
+        try {
+            return operation.get();
+        } finally {
+            lock.unlock();
+        }
+    }
 
     @Override
     public Optional<Message> get(UUID id) {
@@ -47,6 +61,7 @@ public class RecordingMessageCache implements MessageCache {
     public void reset() {
         data.clear();
         calls.clear();
+        locks.clear();
         connected = true;
     }
 }
