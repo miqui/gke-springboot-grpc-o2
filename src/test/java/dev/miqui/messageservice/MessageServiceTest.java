@@ -62,6 +62,34 @@ class MessageServiceTest extends GrpcTestSupport {
     }
 
     @Test
+    void createRejectsNulInTitleAndContentBeforeInserting() {
+        var author = createAuthor();
+        var error = rpcError(() -> messages.createMessage(CreateMessageRequest.newBuilder()
+                .setTitle("Bad\0title").setContent("Bad\0content").setAuthorId(author.getId()).build()));
+
+        assertThat(error.code()).isEqualTo(Code.INVALID_ARGUMENT);
+        assertThat(error.reason()).isEqualTo("BAD_USER_INPUT");
+        assertThat(error.violations()).containsExactly(
+                java.util.Map.entry("title", "title cannot contain NUL characters"),
+                java.util.Map.entry("content", "content cannot contain NUL characters"));
+        assertThat(jdbc.sql("SELECT count(*) FROM messages").query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void updateRejectsNulInTitleAndContentWithoutChangingTheMessage() {
+        Message original = createMessage(createAuthor().getId());
+        var error = rpcError(() -> messages.updateMessage(update(original.getId(), "Bad\0content", 0)
+                .setTitle("Bad\0title").build()));
+
+        assertThat(error.code()).isEqualTo(Code.INVALID_ARGUMENT);
+        assertThat(error.reason()).isEqualTo("BAD_USER_INPUT");
+        assertThat(error.violations()).containsExactly(
+                java.util.Map.entry("title", "title cannot contain NUL characters"),
+                java.util.Map.entry("content", "content cannot contain NUL characters"));
+        assertThat(messages.getMessage(get(original.getId()))).isEqualTo(original);
+    }
+
+    @Test
     void createWithUnknownAuthorIsNotFound() {
         var error = rpcError(() -> createMessage(UUID.randomUUID().toString()));
         assertThat(error.code()).isEqualTo(Code.NOT_FOUND);

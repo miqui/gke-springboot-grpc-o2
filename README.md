@@ -1154,7 +1154,7 @@ The contract is [`message_service.proto`](src/main/proto/message/v1/message_serv
 | `MessageService/UpdateMessage` | message (`version` + 1) | `INVALID_ARGUMENT`, `NOT_FOUND`, **`ABORTED`** (stale version) |
 | `MessageService/DeleteMessage` | `Empty` | `INVALID_ARGUMENT`, `NOT_FOUND` |
 | `AuthorService/ListAuthors` | page (oldest first) | `INVALID_ARGUMENT` |
-| `AuthorService/GetAuthor` | author, optionally with `include_messages` | `INVALID_ARGUMENT`, `NOT_FOUND` |
+| `AuthorService/GetAuthor` | author, optionally with one page of messages | `INVALID_ARGUMENT`, `NOT_FOUND` |
 | `AuthorService/CreateAuthor` | new author | `INVALID_ARGUMENT`, `ALREADY_EXISTS` (duplicate email) |
 | `AuthorService/UpdateAuthor` | author | `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS` |
 | `AuthorService/DeleteAuthor` | `Empty` | `INVALID_ARGUMENT`, `NOT_FOUND`, **`FAILED_PRECONDITION`** (author still has messages) |
@@ -1183,7 +1183,14 @@ client-error cases exercised directly.
 **Validation** (all violations reported at once): message `title` trimmed, non-blank, at most 100
 characters; `content` trimmed, non-blank, at most 1000; author `name` trimmed, non-blank, at most 50;
 `email` trimmed, at most 100, must look like an email address; `UpdateMessage` requires `content`
-and `version`, while `title` is optional (absent = unchanged).
+and `version`, while `title` is optional (absent = unchanged). All four text fields reject NUL
+(U+0000) with a field violation because PostgreSQL cannot store it.
+
+**Author messages.** `GetAuthor(include_messages=true)` returns one page, not all messages:
+`messages_limit` defaults to 50 (range 1-200), and `messages_offset` defaults to 0 (nonnegative
+`int64`). Both offsets are strings in proto3 JSON. If `next_messages_offset` is present, pass it as
+`messages_offset` on the next call with the same author and limit. Stop when it is absent.
+Existing clients that need the full collection must adopt this continuation mechanism.
 
 **Request size.** Inbound messages over 16 KB are rejected by the server (`RESOURCE_EXHAUSTED`);
 together with the pagination bounds and the per-field limits that bounds the cost of any single

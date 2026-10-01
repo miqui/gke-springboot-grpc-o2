@@ -148,12 +148,22 @@ The fix is the client's read-again-and-retry: `GetMessage`, then resend with the
 ### 10. An author with their messages
 
 ```bash
-grpcurl -d '{"id": "<AUTHOR_ID>", "include_messages": true}' $ADDR $A/GetAuthor \
-  | jq '{name: .author.name, messages: [.messages[].title]}'
+grpcurl -d '{"id": "<AUTHOR_ID>", "include_messages": true, "messages_limit": 50, "messages_offset": "0"}' \
+  $ADDR $A/GetAuthor | jq '{name: .author.name, messages: [.messages[].title], next_messages_offset}'
 ```
 
-Without `include_messages` the `messages` list is empty. The embedded messages don't repeat the
-author, so there is no author -> messages -> author nesting.
+This returns one page (default 50 messages, maximum 200), not the entire collection. If
+`next_messages_offset` is present, request the next page using that value:
+
+```bash
+grpcurl -d '{"id": "<AUTHOR_ID>", "include_messages": true, "messages_limit": 50, "messages_offset": "<NEXT_MESSAGES_OFFSET>"}' \
+  $ADDR $A/GetAuthor
+```
+
+Both offsets are `int64`, represented as strings in proto3 JSON. Continue until
+`next_messages_offset` is absent. Pages are newest first; concurrent writes can
+shift offset-based page boundaries. Without `include_messages` the `messages` list is empty and
+there is no continuation. The embedded messages don't repeat the author, so there is no nesting.
 
 ### 11. Error responses
 
@@ -189,6 +199,10 @@ grpcurl -d '{"id": "not-a-uuid"}' $ADDR $M/GetMessage
 
 # INVALID_ARGUMENT / BAD_USER_INPUT - out-of-range pagination (never silently clamped)
 grpcurl -d '{"limit": 500, "offset": -1}' $ADDR $M/ListMessages
+
+# INVALID_ARGUMENT / BAD_USER_INPUT - PostgreSQL cannot store NUL in a text field
+grpcurl -d '{"title": "Hello\u0000world", "content": "Body", "author_id": "<AUTHOR_ID>"}' \
+  $ADDR $M/CreateMessage
 
 # FAILED_PRECONDITION (reason CONFLICT) - deleting an author that still has messages
 grpcurl -d '{"id": "<AUTHOR_ID>"}' $ADDR $A/DeleteAuthor

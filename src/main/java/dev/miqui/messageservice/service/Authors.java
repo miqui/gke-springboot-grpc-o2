@@ -32,12 +32,16 @@ public class Authors {
                 .build());
     }
 
-    public GetAuthorResponse get(UUID id, boolean includeMessages) {
+    public GetAuthorResponse get(UUID id, boolean includeMessages, int limit, long offset) {
         return tx.execute(s -> {
             Author author = authors.find(id).orElseThrow(() -> notFound(id));
             GetAuthorResponse.Builder response = GetAuthorResponse.newBuilder().setAuthor(author);
             if (includeMessages) {
-                response.addAllMessages(authors.messagesOf(id));
+                var messages = authors.messagesOf(id, limit + 1, offset);
+                response.addAllMessages(messages.subList(0, Math.min(limit, messages.size())));
+                if (messages.size() > limit) {
+                    response.setNextMessagesOffset(Math.addExact(offset, limit));
+                }
             }
             return response.build();
         });

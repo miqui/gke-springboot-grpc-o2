@@ -5,6 +5,7 @@
 //                           domain = "message-service.miqui.dev" - the stable code to switch on
 //   - google.rpc.BadRequest one FieldViolation per invalid field (INVALID_ARGUMENT only)
 // See API-DESIGN.md for the status code of every outcome.
+// All text fields reject U+0000 (NUL) with INVALID_ARGUMENT and a field violation.
 syntax = "proto3";
 
 package message.v1;
@@ -106,7 +107,7 @@ message DeleteMessageRequest {
 service AuthorService {
   // Page of authors, oldest first. INVALID_ARGUMENT.
   rpc ListAuthors(ListAuthorsRequest) returns (ListAuthorsResponse);
-  // One author, optionally with their messages (without the author, so there is no cycle).
+  // One author, optionally with one page of their messages (without the author).
   // INVALID_ARGUMENT, NOT_FOUND.
   rpc GetAuthor(GetAuthorRequest) returns (GetAuthorResponse);
   // INVALID_ARGUMENT, ALREADY_EXISTS (duplicate email).
@@ -130,12 +131,18 @@ message ListAuthorsResponse {
 message GetAuthorRequest {
   string id = 1;
   bool include_messages = 2;
+  // 1-200, default 50 when absent. Validated even when include_messages is false.
+  optional int32 messages_limit = 3;
+  // 0 or more, default 0. Uses int64 so continuation is not limited to int32 offsets.
+  optional int64 messages_offset = 4;
 }
 
 message GetAuthorResponse {
   Author author = 1;
-  // Newest first; only populated when include_messages is true.
+  // One page, newest first; only populated when include_messages is true.
   repeated MessageSummary messages = 2;
+  // Present only when another page exists. Send it as messages_offset on the next request.
+  optional int64 next_messages_offset = 3;
 }
 
 message CreateAuthorRequest {
