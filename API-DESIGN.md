@@ -138,13 +138,25 @@ entry after their transaction commits (transactions are explicit, via `Transacti
 eviction visibly happens after the commit). Lists and author RPCs don't use the cache. There is no TTL
 and no near cache (a near cache went stale across pods).
 
-The one subtle case: a slow reader can load the row *before* an update and write it into the cache
-*after* that update's eviction. With no TTL nothing would ever remove that entry, and clients would
-keep reading the stale `version` and get `ABORTED` on every write. So a stale-version failure also
-evicts the entry - the caller's version was stale, so the cached copy may be too - and the next read
-reloads from the database. The cache is **mandatory**: an unreachable Hazelcast member fails startup
-rather than running without it, and a client that gave up reconnecting fails liveness so the
-container is restarted.
+Cache hits reuse the message fields but reload the embedded author from Postgres. `UpdateAuthor`
+therefore takes effect on subsequent message reads without invalidating every message by that
+author. A hit costs one author lookup; a miss loads the message and author together.
+
+`GetMessage`, `UpdateMessage`, and `DeleteMessage` share a Hazelcast per-message map lock across
+replicas. A reader holds it through cache lookup, DB read, and cache fill; a mutation holds it through
+DB commit and eviction. A slow reader cannot repopulate a deleted or obsolete message after an
+eviction. Different message ids can proceed independently. Lock acquisition waits at most five
+seconds; failure is logged and returned as `INTERNAL`, never treated as an unlocked cache access.
+The lock has no lease that could expire mid-operation and is released in `finally`. Stale-version
+failures still evict defensively before returning `ABORTED`.
+
+When first deploying this locking protocol, stop all old application replicas and clear the
+Hazelcast `messages` map before starting the new replicas: older replicas do not participate in the
+locks, and existing stale entries are not repaired by introducing locks. Afterwards every writer
+must use the same protocol; direct database edits also require cache invalidation.
+
+The cache is **mandatory**: an unreachable Hazelcast member fails startup rather than running
+without it, and a client that gave up reconnecting fails liveness so the container is restarted.
 
 ## Bounding the cost of a request
 
