@@ -46,9 +46,15 @@ public class AuthorRepository {
     }
 
     /** Newest first, without the author (no author -> messages -> author cycle). */
-    public List<MessageSummary> messagesOf(UUID authorId) {
-        return jdbc.sql("SELECT id, title, content, created_at, version FROM messages WHERE author_id = :id ORDER BY created_at DESC, id DESC")
+    public List<MessageSummary> messagesOf(UUID authorId, int limit, long offset) {
+        return jdbc.sql("""
+                        SELECT id, title, content, created_at, version FROM messages
+                        WHERE author_id = :id ORDER BY created_at DESC, id DESC
+                        LIMIT :limit OFFSET :offset
+                        """)
                 .param("id", authorId)
+                .param("limit", limit)
+                .param("offset", offset)
                 .query((rs, n) -> Rows.summary(rs))
                 .list();
     }

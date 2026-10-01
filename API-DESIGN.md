@@ -23,7 +23,7 @@ one author). The tables are in
 | `MessageService/UpdateMessage` | Update `{id, title?, content, version}` | `Message` (`version` + 1) | `INVALID_ARGUMENT`, `NOT_FOUND`, **`ABORTED`** stale version |
 | `MessageService/DeleteMessage` | Delete | `Empty` | `INVALID_ARGUMENT`, `NOT_FOUND` |
 | `AuthorService/ListAuthors` | Page of authors, oldest first | `{items, total_count}` | `INVALID_ARGUMENT` |
-| `AuthorService/GetAuthor` | One author, optionally with their messages (`include_messages`) | `{author, messages}` | `INVALID_ARGUMENT`, `NOT_FOUND` |
+| `AuthorService/GetAuthor` | One author, optionally with a page of messages (`include_messages`) | `{author, messages, next_messages_offset?}` | `INVALID_ARGUMENT`, `NOT_FOUND` |
 | `AuthorService/CreateAuthor` | Create `{name, email}` | `Author` | `INVALID_ARGUMENT`, **`ALREADY_EXISTS`** duplicate email |
 | `AuthorService/UpdateAuthor` | Update `{id, name?, email?}` | `Author` | `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS` |
 | `AuthorService/DeleteAuthor` | Delete | `Empty` | `INVALID_ARGUMENT`, `NOT_FOUND`, **`FAILED_PRECONDITION`** still has messages |
@@ -52,9 +52,14 @@ state they read.
   read-again-and-retry), a duplicate email is `ALREADY_EXISTS`, and deleting an author who still has
   messages is `FAILED_PRECONDITION`. All three carry `ErrorInfo.reason = CONFLICT`.
 - **`include_messages`** on `GetAuthor` embeds the author's messages as `MessageSummary` *without*
-  their author, so the response has no author -> messages -> author cycle to bound.
-- **Timestamps** are `google.protobuf.Timestamp` (RFC 3339 in JSON). **`int64`** values (`total_count`)
-  are strings in proto3 JSON, per the spec.
+  their author. Results are one page, newest first (`created_at DESC, id DESC`): `messages_limit`
+  defaults to 50 and is capped at 200, and `messages_offset` defaults to 0. If another page exists,
+  `next_messages_offset` is present; pass it as `messages_offset` with the same author id,
+  `include_messages: true`, and page size. When it is absent, paging is complete. Without
+  `include_messages`, both the messages and continuation are omitted/empty; supplied pagination
+  fields are still validated.
+- **Timestamps** are `google.protobuf.Timestamp` (RFC 3339 in JSON). **`int64`** values (`total_count`,
+  `messages_offset`, `next_messages_offset`) are strings in proto3 JSON, per the spec.
 - **Field names.** The proto uses `snake_case`. The standard proto3 JSON mapping (what k6's
   `k6/net/grpc` and most gateways produce) is `lowerCamelCase`; `grpcurl` prints the proto names.
   Parsers accept either spelling on input. A field at its default value (for example `version: 0`) is
@@ -75,6 +80,11 @@ and called by the gRPC service classes. Every failing field is reported at once,
 | `version` | required on update, `0` to 2,147,483,647 |
 | `limit` | `1` to `200` (default `50` when absent) |
 | `offset` | `0` or more (default `0` when absent) |
+| `messages_limit` | `1` to `200` (default `50` when absent) |
+| `messages_offset` | `0` or more, `int64` (default `0` when absent) |
+
+All text fields (`title`, `content`, `name`, `email`) reject NUL (U+0000), which PostgreSQL cannot
+store, with a field violation rather than allowing a database error to become `INTERNAL`.
 
 On `UpdateMessage`/`UpdateAuthor`, an optional field that is *present* must pass the same check as on
 create - a blank `title` is `INVALID_ARGUMENT`, not "leave it alone". Out-of-range pagination values
@@ -163,13 +173,24 @@ without it, and a client that gave up reconnecting fails liveness so the contain
 There's no query language to constrain, so the cost of one request is bounded by ordinary limits:
 
 - **Pagination** - `limit` is capped at 200, so no list response is unbounded.
+  `GetAuthor(include_messages=true)` also returns at most 200 messages and fetches at most one
+  additional row to determine whether a next page exists; it never loads the entire relationship.
 - **Field lengths** - per-field maximums (above), so a single message is at most a few KB.
 - **Message size** - inbound messages over 16 KB are rejected by the gRPC server
   (`spring.grpc.server.inbound.message.max-size`).
 - **Connection pool** - each pod has at most 10 database connections (`DB_POOL_MAX`), so 6 pods stay
   well under Cloud SQL's `max_connections = 100`.
-- **Relationships** - `include_messages` returns messages without their author, so there's no cycle
-  for a client to expand.
+- **Relationships** - `include_messages` returns a bounded page of messages without their author.
+  The `(author_id, created_at DESC, id DESC)` index in Flyway migration V2 supports this query.
+
+### Author-message pagination compatibility
+
+`GetAuthor(include_messages=true)` now returns a page rather than every message. Existing requests
+still parse and return up to 50 messages by default, but clients requiring the entire collection
+must inspect `next_messages_offset` and continue until it is absent. This is an intentional
+behavior change to bound response memory and size; the new fields do not reuse existing numbers.
+As with the existing offset-based list APIs, concurrent inserts/deletes can shift page boundaries:
+this is not a snapshot or a cursor guarantee.
 
 ## Exposure
 

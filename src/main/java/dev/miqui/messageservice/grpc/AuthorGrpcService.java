@@ -45,8 +45,10 @@ public class AuthorGrpcService extends AuthorServiceGrpc.AuthorServiceImplBase {
         Rpc.unary(response, () -> {
             Violations v = new Violations();
             UUID id = v.uuid("id", request.getId());
+            int limit = v.limit("messages_limit", request.hasMessagesLimit(), request.getMessagesLimit());
+            long offset = v.offset("messages_offset", request.hasMessagesOffset(), request.getMessagesOffset());
             v.throwIfAny();
-            return authors.get(id, request.getIncludeMessages());
+            return authors.get(id, request.getIncludeMessages(), limit, offset);
         });
     }
 

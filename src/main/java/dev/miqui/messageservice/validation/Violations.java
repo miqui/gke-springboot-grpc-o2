@@ -35,7 +35,9 @@ public final class Violations {
 
     public String text(String field, String value, int maxLength) {
         String trimmed = value == null ? "" : value.strip();
-        if (trimmed.isEmpty()) {
+        if (trimmed.indexOf('\0') >= 0) {
+            add(field, field + " cannot contain NUL characters");
+        } else if (trimmed.isEmpty()) {
             add(field, field + " is required and cannot be blank");
         } else if (trimmed.length() > maxLength) {
             add(field, field + " cannot exceed " + maxLength + " characters");
@@ -61,18 +63,26 @@ public final class Violations {
     }
 
     public int limit(boolean present, int value) {
+        return limit("limit", present, value);
+    }
+
+    public int limit(String field, boolean present, int value) {
         if (!present) {
             return LIMIT_DEFAULT;
         }
         if (value < 1 || value > LIMIT_MAX) {
-            add("limit", "limit must be between 1 and " + LIMIT_MAX);
+            add(field, field + " must be between 1 and " + LIMIT_MAX);
         }
         return value;
     }
 
     public int offset(boolean present, int value) {
+        return Math.toIntExact(offset("offset", present, value));
+    }
+
+    public long offset(String field, boolean present, long value) {
         if (present && value < 0) {
-            add("offset", "offset must be 0 or greater");
+            add(field, field + " must be 0 or greater");
         }
         return present ? value : 0;
     }
