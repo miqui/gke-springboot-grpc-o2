@@ -6,7 +6,7 @@ All four confirmed defects from the original gRPC API review are fixed:
 
 - PR #2: stale embedded authors in cached messages and cache-fill races after message updates/deletes.
 - PR #3: unbounded author-message responses and NUL input reaching PostgreSQL.
-- PR #4: repository-owned JaCoCo, SpotBugs, and PMD quality gates, required on PRs to `main`.
+- PR #4: repository-owned JaCoCo, SpotBugs, and PMD quality gates run on PRs to `main`; making them merge-blocking requires applying `quality/main-protection.json`.
 
 ## Remaining review and improvement areas
 
