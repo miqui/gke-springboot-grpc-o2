@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1
 # Multi-stage Dockerfile for the Spring Boot gRPC API
 
-# Stage 1: build the jar with the Maven wrapper. The dependency layer (pom + wrapper only) is
+# Stage 1: build the jar with the Maven wrapper. The dependency layer (pom + wrapper + policies) is
 # separate from the source layer, so editing src/ doesn't re-download dependencies. Tests run in CI
-# (`./mvnw verify`, which needs Docker for Testcontainers), not here.
+# (`./mvnw clean verify`, which needs Docker for Testcontainers), not here.
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /build
 COPY mvnw pom.xml ./
 COPY .mvn/ .mvn/
+COPY quality/ quality/
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:go-offline
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package \

@@ -8,17 +8,13 @@ on:
       - "pom.xml"
       - "mvnw"
       - ".mvn/**"
+      - "quality/**"
+      - "scripts/quality-summary.py"
+      - "scripts/test_quality_summary.py"
       - "Dockerfile"
       - ".github/workflows/message-service-ci.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "src/**"
-      - "pom.xml"
-      - "mvnw"
-      - ".mvn/**"
-      - "Dockerfile"
-      - ".github/workflows/message-service-ci.yml"
   workflow_dispatch: {}
 
 # Image: us-central1-docker.pkg.dev/<project>/springboot-grpc-o2/grpc-message-api (Artifact Registry).
@@ -32,11 +28,11 @@ env:
   IMAGE: us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api
 
 jobs:
-  build-and-push:
+  quality-gates:
+    name: API quality gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # OIDC token for Workload Identity Federation
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,11 +44,20 @@ jobs:
           java-version: "21"
           cache: maven
 
-      # Compiles the protos, then unit + integration tests. The integration tests start the whole
-      # app against a real Postgres via Testcontainers (the runner's Docker daemon), so Flyway,
-      # constraints and optimistic locking run for real; Hazelcast is faked.
-      - name: Build and test
-        run: ./mvnw -B -ntp verify
+      - name: Test quality summary
+        run: python3 -m unittest discover -s scripts -p 'test_quality_summary.py'
+
+      # Every PR runs this job, including policy-only and documentation-only PRs, so a required
+      # check never stays pending because of path filters. Reports always start from a clean build.
+      - name: Verify tests and API quality
+        id: verify
+        run: ./mvnw -B -ntp clean verify
+
+      - name: Summarize API quality
+        if: always()
+        env:
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: python3 scripts/quality-summary.py >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test reports
         if: failure()
@@ -62,12 +67,21 @@ jobs:
           path: target/surefire-reports/
           retention-days: 7
 
+  build-and-push:
+    needs: quality-gates
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
-        if: github.event_name != 'pull_request'
         uses: docker/setup-buildx-action@v3
 
       - name: Authenticate to Google Cloud
-        if: github.event_name != 'pull_request'
         id: gcp
         uses: google-github-actions/auth@v2
         with:
@@ -76,7 +90,6 @@ jobs:
           token_format: access_token
 
       - name: Log in to Artifact Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -86,13 +99,11 @@ jobs:
       # <UTC yyyymmddHHMMSS>-<7-char sha>: sorts lexically by build time (Argo CD Image Updater's
       # "alphabetical" strategy picks the highest tag) while still identifying the commit.
       - name: Compute image tag
-        if: github.event_name != 'pull_request'
         id: meta
         run: echo "tag=$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       # amd64 only: GKE's e2 nodes are x86_64.
       - name: Build and push
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .

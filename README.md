@@ -236,11 +236,13 @@ doesn't prune - a bad render must never delete the controller doing the deleting
 merged to `main`, or drift introduced by hand in the cluster, gets reconciled. See
 [`ARGOCD.md`](ARGOCD.md) for day-to-day commands.
 
-- **CI** (`.github/workflows/message-service-ci.yml`): on push to `main` (and on pull requests, up
-  to the test gate), path-filtered to `src/**`, `pom.xml`, the Maven wrapper and the `Dockerfile`,
-  the workflow runs `./mvnw verify` as a gate - it compiles the protos, then runs the 29 unit and
-  integration tests, which start the whole app against a real Postgres via Testcontainers (the
-  runner's Docker daemon; Hazelcast is faked) - then builds and pushes
+- **CI** (`.github/workflows/message-service-ci.yml`): every pull request to `main` runs the
+  **API quality gates** check, including documentation-only PRs so a required check cannot remain
+  pending because of path filters. Pushes to `main` are filtered to API/build/policy inputs.
+  The workflow runs `./mvnw clean verify` - protos, the full unit/integration suite, JaCoCo,
+  SpotBugs, and PMD - and publishes a GitHub job summary. RPC integration tests start the app
+  against real Postgres via Testcontainers (the runner's Docker daemon; a recording cache stands
+  in for Hazelcast). After the gates pass, a separate main-only job builds and pushes
   `us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api`, tagged
   `<UTC yyyymmddHHMMSS>-<7-char sha>` (e.g. `20260918140501-a1b2c3d`, sortable by build time yet
   traceable to a commit) plus a floating `:latest`, `linux/amd64` only (GKE's e2 nodes). **There is no
@@ -444,12 +446,51 @@ connection is required, not optional) - deliberate, matching how the DB connecti
 ### 2. Tests
 
 ```bash
-./mvnw verify        # needs Docker: Testcontainers starts a real Postgres
+./mvnw clean verify  # needs Docker: Testcontainers starts a real Postgres
 ```
 
 The integration tests run the real application (Flyway migration, constraints, optimistic locking)
-against Postgres and call it over in-process gRPC; only Hazelcast is replaced by an in-memory fake
-(`RecordingMessageCache`). This is the same command CI runs.
+against Postgres and call it over a real Netty gRPC server. Those tests replace Hazelcast with
+`RecordingMessageCache`; separate cache tests use a real member and two clients. This is the same
+command CI runs.
+
+#### Repository-owned API quality gates
+
+No hosted analysis service, token, or GKE workload is needed. All three tools run during Maven
+`verify`, against handwritten `grpc`, `service`, `repo`, `cache`, `validation`, and `error` packages.
+Generated protobuf/stub classes, startup/configuration code, and test code are outside the static
+analysis/coverage scope; the full test suite still runs.
+
+| Gate | Policy | Local result |
+| --- | --- | --- |
+| JaCoCo | At least **93% line** and **85% branch** coverage, configured in `pom.xml` | `target/site/jacoco/index.html`, `jacoco.xml` |
+| SpotBugs | Zero high/medium-confidence findings; exact constructor/field injection exceptions in `quality/spotbugs-exclude.xml` | `target/spotbugsXml.xml` |
+| PMD | Zero violations of the seven correctness/complexity rules in `quality/pmd-ruleset.xml` | `target/pmd.xml` |
+
+The initial full-suite baseline is 93.70% lines and 87.23% branches. Floors are explicit policies,
+not an automatic baseline comparison: they do not prove behavioral correctness or require every
+new line to be covered. Review any threshold change or suppression as a policy change.
+
+CI fails on a violated gate and on a supposedly successful build with missing/invalid reports.
+The summary contains coverage and finding counts without uploading reports to an external service
+or retaining extra coverage artifacts. To render it locally after verification:
+
+```bash
+VERIFY_OUTCOME=success python3 scripts/quality-summary.py
+python3 -m unittest discover -s scripts -p 'test_quality_summary.py'
+```
+
+The `main` protection policy in `quality/main-protection.json` requires a PR with the branch up to
+date and the **API quality gates** check supplied by GitHub Actions. It also applies to admins,
+but adds no review-approval requirement. Changing the JSON alone does not change GitHub settings;
+an administrator must apply it:
+
+```bash
+gh api --method PUT 'repos/{owner}/{repo}/branches/main/protection' --input quality/main-protection.json
+```
+
+Image publishing depends on the gates and has separate cloud permissions; PR analysis needs only
+read access to repository contents.
 
 ---
 
