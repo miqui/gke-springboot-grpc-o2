@@ -12,6 +12,7 @@ on:
       - "scripts/quality-summary.py"
       - "scripts/test_quality_summary.py"
       - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/message-service-ci.yml"
   pull_request:
     branches: [main]
@@ -33,11 +34,47 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      image: ${{ github.event_name == 'workflow_dispatch' || steps.changes.outputs.image == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Keep the required check on every PR; filter its expensive steps instead of the workflow.
+      # PRs compare against their base; pushes compare against the commit before the whole push.
+      - name: Detect relevant changes
+        id: changes
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v3
+        with:
+          base: main
+          filters: |
+            quality:
+              - "src/**"
+              - "pom.xml"
+              - "mvnw"
+              - ".mvn/**"
+              - "quality/**"
+              - "scripts/quality-summary.py"
+              - "scripts/test_quality_summary.py"
+              - "Dockerfile"
+              - ".dockerignore"
+              - ".github/workflows/message-service-ci.yml"
+            image:
+              - "src/main/**"
+              - "pom.xml"
+              - "mvnw"
+              - ".mvn/**"
+              - "Dockerfile"
+              - ".dockerignore"
+
+      - name: Skip unrelated changes
+        if: github.event_name != 'workflow_dispatch' && steps.changes.outputs.quality == 'false'
+        run: echo "API quality gates skipped - no API, build, or quality inputs changed." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Set up Java 21
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.quality == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,22 +82,23 @@ jobs:
           cache: maven
 
       - name: Test quality summary
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.quality == 'true'
         run: python3 -m unittest discover -s scripts -p 'test_quality_summary.py'
 
-      # Every PR runs this job, including policy-only and documentation-only PRs, so a required
-      # check never stays pending because of path filters. Reports always start from a clean build.
+      # Reports always start from a clean build.
       - name: Verify tests and API quality
         id: verify
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.quality == 'true'
         run: ./mvnw -B -ntp clean verify
 
       - name: Summarize API quality
-        if: always()
+        if: always() && (steps.verify.outcome == 'success' || steps.verify.outcome == 'failure')
         env:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: python3 scripts/quality-summary.py >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test reports
-        if: failure()
+        if: failure() && steps.verify.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports
@@ -69,7 +107,7 @@ jobs:
 
   build-and-push:
     needs: quality-gates
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.quality-gates.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
