@@ -71,6 +71,7 @@ Logins:
                (self-signed cert - accept it in the browser)
   grafana      kubectl -n observability get secret grafana-credentials -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d
   openobserve  kubectl -n observability get secret openobserve-root-credentials -o jsonpath='{.data.ZO_ROOT_USER_EMAIL}' | base64 -d
+               gcloud secrets versions access latest --secret=openobserve-root-password   (password)
   headlamp     kubectl create token headlamp -n headlamp --duration=1h      (read-only)
   polaris      none - read-only report, reachable only through this tunnel
 
