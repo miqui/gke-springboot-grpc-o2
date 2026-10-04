@@ -237,12 +237,17 @@ merged to `main`, or drift introduced by hand in the cluster, gets reconciled. S
 [`ARGOCD.md`](ARGOCD.md) for day-to-day commands.
 
 - **CI** (`.github/workflows/message-service-ci.yml`): every pull request to `main` runs the
-  **API quality gates** check, including documentation-only PRs so a required check cannot remain
-  pending because of path filters. Pushes to `main` are filtered to API/build/policy inputs.
-  The workflow runs `./mvnw clean verify` - protos, the full unit/integration suite, JaCoCo,
+  **API quality gates** check so a required check cannot remain pending because of path filters.
+  Documentation-only, Kubernetes-only, and other unrelated PRs report a successful no-op without
+  setting up Java or running Maven. Pushes to `main` are filtered to API/build/quality inputs.
+  Changes to `src/**`, Maven inputs, `quality/**`, the quality-summary scripts, `Dockerfile`,
+  `.dockerignore`, or the CI workflow run `./mvnw clean verify` - protos, the full unit/integration suite, JaCoCo,
   SpotBugs, and PMD - and publishes a GitHub job summary. RPC integration tests start the app
   against real Postgres via Testcontainers (the runner's Docker daemon; a recording cache stands
-  in for Hazelcast). After the gates pass, a separate main-only job builds and pushes
+  in for Hazelcast). After the gates pass, a separate main-only job builds and pushes **only when
+  `src/main/**`, Maven inputs, `Dockerfile`, or `.dockerignore` change**; test-only, quality-tooling,
+  and workflow-only changes do not publish an image. Manual runs force the gates and, on `main`,
+  image publishing. The image is
   `us-central1-docker.pkg.dev/k8s-dev-412419/springboot-grpc-o2/grpc-message-api`, tagged
   `<UTC yyyymmddHHMMSS>-<7-char sha>` (e.g. `20260918140501-a1b2c3d`, sortable by build time yet
   traceable to a commit) plus a floating `:latest`, `linux/amd64` only (GKE's e2 nodes). **There is no
@@ -490,7 +495,7 @@ gh api --method PUT 'repos/{owner}/{repo}/branches/main/protection' --input qual
 ```
 
 Image publishing depends on the gates and has separate cloud permissions; PR analysis needs only
-read access to repository contents.
+read access to repository contents and pull-request file lists.
 
 ---
 
