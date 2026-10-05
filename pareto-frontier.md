@@ -57,9 +57,10 @@ Ordered cheap to ambitious. **Experiments 1 and 2 come first.**
 
 ### `main` is the baseline
 
-`main` is not modified for experiments. It is the configuration running today (implicit Serial,
-768Mi, 250m/1500m). Tag it before the first run (`gc-baseline-v1`) so every result can cite the
-exact commit it was measured against.
+`main` is not modified for experiments. It defines the baseline GC configuration running today
+(implicit Serial, 768Mi, 250m/1500m). The baseline overlay keeps those GC settings but uses one
+replica with the HPA removed, matching the capacity of experiments 1-3. Tag `main` before the first
+run (`gc-baseline-v1`) so every result can cite the exact commit it was measured against.
 
 ### One branch for the harness, not one per variant
 
@@ -71,7 +72,7 @@ a PR like any other work:
 
 ```
 k8s/experiments/gc/
-  baseline/            # kustomization with no patches = exactly main
+  baseline/            # main GC settings; one replica and no HPA to match variants
   serial-explicit/
   parallel/
   g1/
