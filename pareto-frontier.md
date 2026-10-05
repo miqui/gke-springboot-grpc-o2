@@ -120,8 +120,10 @@ axes and plots it, with the baseline highlighted.
   can supersede the overlay's pin.
 - **Argo CD self-heal:** the root Application (`k8s/argocd/root-application.yaml`) self-heals its
   child Applications and only ignores `/spec/source/kustomize`. It would therefore revert a change
-  to `/spec/source/path`. Either add `/spec/source/path` to its `ignoreDifferences` on the
-  experiment branch, or turn off auto-sync on the root app for the duration of a sweep.
+  to `/spec/source/path`. The root Application tracks `main`, so an `ignoreDifferences` edit on the
+  experiment branch has no effect. Either add `/spec/source/path` (and
+  `/spec/source/targetRevision`) to the root Application's `ignoreDifferences` on `main`, or turn
+  off auto-sync on the root app for the duration of a sweep.
 - **Fixed load source:** run k6 from the same machine and network each time, or better, as an
   in-cluster Job, so the public load balancer and home network don't add noise to p99.
 - **Same node type** (`e2-standard-2`), with one service pod per node (anti-affinity is already
