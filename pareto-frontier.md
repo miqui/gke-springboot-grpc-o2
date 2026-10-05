@@ -97,8 +97,9 @@ Each overlay uses `../../..` (the `k8s/` base) as its resource and patches only:
 
 ### Run script (`scripts/gc-run.sh <variant>`)
 
-1. Point the `springboot-grpc-o2` Application's `spec.source.path` at
-   `k8s/experiments/gc/<variant>`.
+1. Point the `springboot-grpc-o2` Application's `spec.source.targetRevision` at the experiment
+   branch (`exp/gc-pareto`) and its `spec.source.path` at `k8s/experiments/gc/<variant>`. The
+   Application tracks `main`, where the overlays don't exist, so the path alone is not enough.
 2. Wait for the rollout and for readiness, and record the startup time.
 3. Warm up: 2 minutes of load, discarded (JIT and heap sizing settle).
 4. Measure: a fixed k6 scenario at a fixed arrival rate (`constant-arrival-rate`, so slower
