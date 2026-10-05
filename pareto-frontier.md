@@ -26,7 +26,7 @@ experiments and how the work is organised.
 | Throughput | sustained RPS at < 1% errors | k6 |
 | CPU cost | CPU-seconds per 1k requests | `container_cpu_usage_seconds_total` / request count |
 | Memory footprint | container working set; smallest limit without OOM | `container_memory_working_set_bytes` |
-| GC pauses | max / p99 pause, total pause time | `jvm_gc_pause_seconds_*`, `-Xlog:gc*` |
+| GC pauses | max / p99 pause, total pause time | `jvm_gc_pause_milliseconds_*` (divide `_sum` by 1000 for seconds), `-Xlog:gc*` |
 | Startup | time to readiness | pod `Ready` condition timestamp minus start time |
 
 A configuration is on the frontier if no other configuration is at least as good on every
