@@ -114,8 +114,10 @@ axes and plots it, with the baseline highlighted.
 
 ### Comparability rules
 
-- **Same image for every run.** Pause Argo CD Image Updater during a sweep, or pin the image by
-  digest in the overlay, so a new build can't roll out mid-experiment.
+- **Same image for every run.** Pause Argo CD Image Updater during a sweep so a new build can't
+  roll out mid-experiment. Pinning a digest in the overlay is not an equivalent alternative:
+  Image Updater writes its override into the child Application's `spec.source.kustomize`, which
+  can supersede the overlay's pin.
 - **Argo CD self-heal:** the root Application (`k8s/argocd/root-application.yaml`) self-heals its
   child Applications and only ignores `/spec/source/kustomize`. It would therefore revert a change
   to `/spec/source/path`. Either add `/spec/source/path` to its `ignoreDifferences` on the
